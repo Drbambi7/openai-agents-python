@@ -102,7 +102,7 @@ async def test_run_demo_loop_streaming_prints_tool_call_notification(monkeypatch
     from agents import function_tool
 
     @function_tool
-    def my_tool() -> str:  # type: ignore[empty-body]
+    def my_tool() -> str:
         return "tool result"
 
     model = FakeModel()
