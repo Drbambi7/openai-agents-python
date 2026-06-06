@@ -1,0 +1,31 @@
+# CODEOWNERS — Access Control for Drbambi7/openai-agents-python
+#
+# This file enforces that only @Drbambi7 can approve changes to
+# security-critical paths. GitHub will require her review on any PR
+# that touches these files before it can be merged.
+#
+# Docs: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# ── Default owner for everything ──────────────────────────────────────
+*                                   @Drbambi7
+
+# ── GitHub Actions / Workflows ─────────────────────────────────────────
+# Any change to CI/CD pipelines requires explicit approval.
+.github/workflows/                  @Drbambi7
+.github/scripts/                    @Drbambi7
+
+# ── Copilot Agent definitions ──────────────────────────────────────────
+# CRITICAL: files here instruct AI agents. Only @Drbambi7 may add/edit them.
+.github/agents/                     @Drbambi7
+.github/codex/                      @Drbambi7
+
+# ── Codex hooks (run automatically on every session stop) ─────────────
+.codex/                             @Drbambi7
+
+# ── Package / Release configuration ───────────────────────────────────
+pyproject.toml                      @Drbambi7
+uv.lock                             @Drbambi7
+Makefile                            @Drbambi7
+
+# ── This file itself ───────────────────────────────────────────────────
+.github/CODEOWNERS                  @Drbambi7
