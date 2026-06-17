@@ -10,20 +10,112 @@ Run:
     python app.py
 """
 
+import json
+import logging
 import os
+import time
+from collections import defaultdict
+from functools import wraps
 
 from flask import Flask, jsonify, request
 from openai import OpenAI
 
+# ────────────────────────────────────────────────
+# Startup validation – fail fast if key is missing
+# ────────────────────────────────────────────────
+
+_api_key = os.environ.get("OPENAI_API_KEY", "")
+if not _api_key:
+    raise RuntimeError(
+        "OPENAI_API_KEY is not set. "
+        "Export it before starting the server:\n"
+        "  export OPENAI_API_KEY=sk-..."
+    )
+
+# ────────────────────────────────────────────────
+# App + logging
+# ────────────────────────────────────────────────
+
+logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
+logger = logging.getLogger(__name__)
+
 app = Flask(__name__)
 
-client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY"))
+# Block bodies larger than 64 KB – prevents memory exhaustion.
+app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
+
+client = OpenAI(api_key=_api_key)
+
+# ────────────────────────────────────────────────
+# Security headers on every response
+# ────────────────────────────────────────────────
+
+@app.after_request
+def add_security_headers(response):
+    response.headers["X-Content-Type-Options"] = "nosniff"
+    response.headers["X-Frame-Options"] = "DENY"
+    response.headers["Content-Security-Policy"] = "default-src 'none'"
+    response.headers["Referrer-Policy"] = "no-referrer"
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+
+# ────────────────────────────────────────────────
+# Simple in-memory rate limiter
+# max_calls per window_seconds per IP
+# ────────────────────────────────────────────────
+
+_rate_store: dict[str, list[float]] = defaultdict(list)
+MAX_CALLS = 10        # בקשות
+WINDOW_SEC = 60       # לדקה
+
+
+def rate_limit(fn):
+    @wraps(fn)
+    def wrapper(*args, **kwargs):
+        ip = request.remote_addr or "unknown"
+        now = time.time()
+        calls = [t for t in _rate_store[ip] if now - t < WINDOW_SEC]
+        if len(calls) >= MAX_CALLS:
+            return jsonify({"error": "יותר מדי בקשות. נסה שוב בעוד דקה."}), 429
+        calls.append(now)
+        _rate_store[ip] = calls
+        return fn(*args, **kwargs)
+    return wrapper
+
+
+# ────────────────────────────────────────────────
+# Input helpers
+# ────────────────────────────────────────────────
+
+MAX_TEXT_LEN = 2_000  # תווים
+
+
+def _extract_text() -> tuple[str, tuple | None]:
+    """Return (text, None) on success or ("", error_response) on failure."""
+    if not request.is_json:
+        return "", (jsonify({"error": "Content-Type חייב להיות application/json."}), 415)
+
+    data = request.get_json(silent=True) or {}
+    text = str(data.get("text", "")).strip()
+
+    if not text:
+        return "", (jsonify({"error": "שדה 'text' נדרש."}), 400)
+
+    if len(text) > MAX_TEXT_LEN:
+        return "", (
+            jsonify({"error": f"הטקסט ארוך מדי. מקסימום {MAX_TEXT_LEN} תווים."}),
+            400,
+        )
+
+    return text, None
+
 
 # ────────────────────────────────────────────────
 # Access Engine – ניתוח פרופיל אישי
 # ────────────────────────────────────────────────
 
-def analyze_person(input_text: str) -> str:
+def analyze_person(input_text: str) -> dict:
     """Extract a structured personal profile from free-form text."""
     response = client.chat.completions.create(
         model="gpt-4o",
@@ -41,14 +133,14 @@ def analyze_person(input_text: str) -> str:
         response_format={"type": "json_object"},
         max_tokens=300,
     )
-    return response.choices[0].message.content
+    return json.loads(response.choices[0].message.content)
 
 
 # ────────────────────────────────────────────────
 # Mirror Engine – ניתוח רגשות
 # ────────────────────────────────────────────────
 
-def analyze_emotions(input_text: str) -> str:
+def analyze_emotions(input_text: str) -> dict:
     """Detect emotions and psychological tone from free-form text."""
     response = client.chat.completions.create(
         model="gpt-4o",
@@ -67,7 +159,7 @@ def analyze_emotions(input_text: str) -> str:
         response_format={"type": "json_object"},
         max_tokens=300,
     )
-    return response.choices[0].message.content
+    return json.loads(response.choices[0].message.content)
 
 
 # ────────────────────────────────────────────────
@@ -75,49 +167,48 @@ def analyze_emotions(input_text: str) -> str:
 # ────────────────────────────────────────────────
 
 @app.route("/analyze", methods=["POST"])
+@rate_limit
 def analyze():
     """Access Engine endpoint – returns a personal profile."""
-    data = request.get_json(silent=True) or {}
-    text = data.get("text", "").strip()
-    if not text:
-        return jsonify({"error": "שדה 'text' נדרש."}), 400
+    text, err = _extract_text()
+    if err:
+        return err
     try:
-        import json
-        profile = json.loads(analyze_person(text))
-        return jsonify({"profile": profile})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"profile": analyze_person(text)})
+    except Exception:
+        logger.exception("analyze_person failed")
+        return jsonify({"error": "שגיאה פנימית. נסה שוב מאוחר יותר."}), 500
 
 
 @app.route("/emotions", methods=["POST"])
+@rate_limit
 def emotions():
     """Mirror Engine endpoint – returns emotional analysis."""
-    data = request.get_json(silent=True) or {}
-    text = data.get("text", "").strip()
-    if not text:
-        return jsonify({"error": "שדה 'text' נדרש."}), 400
+    text, err = _extract_text()
+    if err:
+        return err
     try:
-        import json
-        analysis = json.loads(analyze_emotions(text))
-        return jsonify({"emotions": analysis})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({"emotions": analyze_emotions(text)})
+    except Exception:
+        logger.exception("analyze_emotions failed")
+        return jsonify({"error": "שגיאה פנימית. נסה שוב מאוחר יותר."}), 500
 
 
 @app.route("/profile", methods=["POST"])
+@rate_limit
 def full_profile():
     """Combined endpoint – returns both profile and emotional analysis."""
-    data = request.get_json(silent=True) or {}
-    text = data.get("text", "").strip()
-    if not text:
-        return jsonify({"error": "שדה 'text' נדרש."}), 400
+    text, err = _extract_text()
+    if err:
+        return err
     try:
-        import json
-        profile = json.loads(analyze_person(text))
-        emotions_data = json.loads(analyze_emotions(text))
-        return jsonify({"profile": profile, "emotions": emotions_data})
-    except Exception as e:
-        return jsonify({"error": str(e)}), 500
+        return jsonify({
+            "profile": analyze_person(text),
+            "emotions": analyze_emotions(text),
+        })
+    except Exception:
+        logger.exception("full_profile failed")
+        return jsonify({"error": "שגיאה פנימית. נסה שוב מאוחר יותר."}), 500
 
 
 @app.route("/health", methods=["GET"])
@@ -126,4 +217,6 @@ def health():
 
 
 if __name__ == "__main__":
-    app.run(debug=True, port=5000)
+    # debug=False חובה בפרודקשן – debug=True מאפשר הרצת קוד שרירותי מהדפדפן.
+    debug = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
+    app.run(debug=debug, port=5000)
