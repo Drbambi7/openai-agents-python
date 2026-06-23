@@ -13,6 +13,7 @@ Run:
 import json
 import logging
 import os
+import threading
 import time
 from collections import defaultdict
 from functools import wraps
@@ -44,7 +45,7 @@ app = Flask(__name__)
 # Block bodies larger than 64 KB – prevents memory exhaustion.
 app.config["MAX_CONTENT_LENGTH"] = 64 * 1024
 
-client = OpenAI(api_key=_api_key)
+client = OpenAI(api_key=_api_key, timeout=30.0)
 
 # ────────────────────────────────────────────────
 # Security headers on every response
@@ -57,6 +58,13 @@ def add_security_headers(response):
     response.headers["Content-Security-Policy"] = "default-src 'none'"
     response.headers["Referrer-Policy"] = "no-referrer"
     response.headers["Cache-Control"] = "no-store"
+    response.headers["X-Permitted-Cross-Domain-Policies"] = "none"
+    response.headers["Permissions-Policy"] = "geolocation=(), microphone=(), camera=()"
+    # הסתר את גרסת Flask/Werkzeug/Python מהתוקף
+    response.headers["Server"] = "server"
+    # הפעל HSTS רק בפרודקשן עם HTTPS
+    if os.environ.get("HTTPS_ENABLED", "false").lower() == "true":
+        response.headers["Strict-Transport-Security"] = "max-age=31536000; includeSubDomains"
     return response
 
 
@@ -66,20 +74,35 @@ def add_security_headers(response):
 # ────────────────────────────────────────────────
 
 _rate_store: dict[str, list[float]] = defaultdict(list)
+_rate_lock = threading.Lock()
 MAX_CALLS = 10        # בקשות
 WINDOW_SEC = 60       # לדקה
+CLEANUP_EVERY = 500   # נקה זיכרון כל N בקשות
+_request_counter = 0
+
+
+def _cleanup_old_entries(now: float) -> None:
+    """Remove IPs with no recent requests to prevent unbounded memory growth."""
+    stale = [ip for ip, ts in _rate_store.items() if not any(now - t < WINDOW_SEC for t in ts)]
+    for ip in stale:
+        del _rate_store[ip]
 
 
 def rate_limit(fn):
     @wraps(fn)
     def wrapper(*args, **kwargs):
+        global _request_counter
         ip = request.remote_addr or "unknown"
         now = time.time()
-        calls = [t for t in _rate_store[ip] if now - t < WINDOW_SEC]
-        if len(calls) >= MAX_CALLS:
-            return jsonify({"error": "יותר מדי בקשות. נסה שוב בעוד דקה."}), 429
-        calls.append(now)
-        _rate_store[ip] = calls
+        with _rate_lock:
+            _request_counter += 1
+            if _request_counter % CLEANUP_EVERY == 0:
+                _cleanup_old_entries(now)
+            calls = [t for t in _rate_store[ip] if now - t < WINDOW_SEC]
+            if len(calls) >= MAX_CALLS:
+                return jsonify({"error": "יותר מדי בקשות. נסה שוב בעוד דקה."}), 429
+            calls.append(now)
+            _rate_store[ip] = calls
         return fn(*args, **kwargs)
     return wrapper
 
