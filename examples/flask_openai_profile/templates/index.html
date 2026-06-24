@@ -1,0 +1,372 @@
+<!DOCTYPE html>
+<html lang="he" dir="rtl">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Profile AI — ניתוח פרופיל</title>
+  <style>
+    * { box-sizing: border-box; margin: 0; padding: 0; }
+    body {
+      font-family: 'Segoe UI', Arial, sans-serif;
+      background: #0f0f13;
+      color: #e2e2e2;
+      min-height: 100vh;
+      padding: 2rem 1rem;
+    }
+    header {
+      text-align: center;
+      margin-bottom: 2rem;
+    }
+    header h1 { font-size: 2rem; color: #a78bfa; letter-spacing: 1px; }
+    header p  { color: #888; margin-top: .4rem; font-size: .95rem; }
+
+    .card {
+      background: #1a1a24;
+      border: 1px solid #2a2a3a;
+      border-radius: 12px;
+      padding: 1.5rem;
+      max-width: 860px;
+      margin: 0 auto 1.5rem;
+    }
+
+    textarea {
+      width: 100%;
+      min-height: 140px;
+      background: #12121a;
+      border: 1px solid #333;
+      border-radius: 8px;
+      color: #e2e2e2;
+      font-size: 1rem;
+      padding: 1rem;
+      resize: vertical;
+      outline: none;
+      line-height: 1.6;
+    }
+    textarea:focus { border-color: #a78bfa; }
+
+    .counter { font-size: .8rem; color: #555; text-align: left; margin-top: .4rem; }
+    .counter.warn { color: #f87171; }
+
+    .engines {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+      gap: .75rem;
+      margin-top: 1rem;
+    }
+    button {
+      padding: .7rem 1rem;
+      border: none;
+      border-radius: 8px;
+      font-size: .9rem;
+      font-weight: 600;
+      cursor: pointer;
+      transition: opacity .15s, transform .1s;
+    }
+    button:hover   { opacity: .85; }
+    button:active  { transform: scale(.97); }
+    button:disabled { opacity: .4; cursor: not-allowed; }
+
+    .btn-access   { background: #7c3aed; color: #fff; }
+    .btn-mirror   { background: #0e7490; color: #fff; }
+    .btn-language { background: #065f46; color: #fff; }
+    .btn-shadow   { background: #7f1d1d; color: #fff; }
+    .btn-full     { background: #a78bfa; color: #0f0f13; font-size: 1rem; }
+
+    #results { max-width: 860px; margin: 0 auto; }
+
+    .result-block {
+      background: #1a1a24;
+      border: 1px solid #2a2a3a;
+      border-radius: 12px;
+      padding: 1.5rem;
+      margin-bottom: 1rem;
+      animation: fadeIn .3s ease;
+    }
+    @keyframes fadeIn { from { opacity:0; transform:translateY(8px) } to { opacity:1; transform:none } }
+
+    .result-block h2 {
+      font-size: 1rem;
+      font-weight: 700;
+      margin-bottom: 1rem;
+      padding-bottom: .5rem;
+      border-bottom: 1px solid #2a2a3a;
+    }
+    .engine-access   h2 { color: #a78bfa; }
+    .engine-mirror   h2 { color: #22d3ee; }
+    .engine-language h2 { color: #34d399; }
+    .engine-shadow   h2 { color: #f87171; }
+    .engine-summary  h2 { color: #fbbf24; }
+
+    .fields { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: .75rem; }
+    .field label { font-size: .75rem; color: #666; display: block; margin-bottom: .2rem; }
+    .field .val  { font-size: .95rem; color: #e2e2e2; }
+    .field .val.null { color: #444; font-style: italic; }
+
+    .pill-list { display: flex; flex-wrap: wrap; gap: .4rem; }
+    .pill {
+      background: #2a2a3a;
+      border-radius: 20px;
+      padding: .25rem .75rem;
+      font-size: .8rem;
+      color: #c4b5fd;
+    }
+    .pill.red   { color: #fca5a5; background: #3b1a1a; }
+    .pill.green { color: #6ee7b7; background: #0d2b22; }
+    .pill.blue  { color: #93c5fd; background: #0c1f3b; }
+
+    .score-bar-wrap { margin-top: .3rem; }
+    .score-bar {
+      height: 6px;
+      border-radius: 3px;
+      background: #2a2a3a;
+      overflow: hidden;
+    }
+    .score-fill { height: 100%; border-radius: 3px; transition: width .5s ease; }
+
+    .headline-box {
+      background: #12121a;
+      border-radius: 8px;
+      padding: 1rem 1.2rem;
+      margin-bottom: 1rem;
+    }
+    .headline-box .headline { font-size: 1.3rem; font-weight: 700; color: #fbbf24; }
+    .headline-box .score    { font-size: .85rem; color: #888; margin-top: .3rem; }
+
+    .spinner {
+      display: inline-block;
+      width: 18px; height: 18px;
+      border: 2px solid #555;
+      border-top-color: #a78bfa;
+      border-radius: 50%;
+      animation: spin .7s linear infinite;
+      vertical-align: middle;
+      margin-left: .5rem;
+    }
+    @keyframes spin { to { transform: rotate(360deg) } }
+
+    .error-box {
+      background: #2a0a0a;
+      border: 1px solid #7f1d1d;
+      border-radius: 8px;
+      padding: 1rem;
+      color: #fca5a5;
+      margin-bottom: 1rem;
+    }
+  </style>
+</head>
+<body>
+
+<header>
+  <h1>Profile AI</h1>
+  <p>הכנס טקסט — שיחה, תיאור, הודעות — וקבל ניתוח מעמיק</p>
+</header>
+
+<div class="card">
+  <textarea id="inputText" placeholder="הכנס כאן טקסט על האדם שברצונך לנתח...&#10;&#10;לדוגמה: ציטוט, שיחה, תיאור, הודעות, ועוד."></textarea>
+  <div class="counter" id="counter">0 / 3000 תווים</div>
+  <div class="engines">
+    <button class="btn-access"   onclick="runEngine('access')">👤 פרופיל אישי</button>
+    <button class="btn-mirror"   onclick="runEngine('emotions')">🪞 מצב רגשי</button>
+    <button class="btn-language" onclick="runEngine('language')">💬 סגנון שפה</button>
+    <button class="btn-shadow"   onclick="runEngine('shadow')">🔍 צד נסתר</button>
+    <button class="btn-full"     onclick="runEngine('full')">⚡ ניתוח מלא</button>
+  </div>
+</div>
+
+<div id="results"></div>
+
+<script>
+const MAX = 3000;
+const textarea = document.getElementById('inputText');
+const counter  = document.getElementById('counter');
+
+textarea.addEventListener('input', () => {
+  const n = textarea.value.length;
+  counter.textContent = `${n} / ${MAX} תווים`;
+  counter.classList.toggle('warn', n > MAX * 0.9);
+});
+
+function pill(text, cls = '') {
+  return `<span class="pill ${cls}">${text}</span>`;
+}
+
+function scoreBar(val, max = 10, color = '#a78bfa') {
+  const pct = Math.round((val / max) * 100);
+  return `<div class="score-bar-wrap">
+    <div class="score-bar"><div class="score-fill" style="width:${pct}%;background:${color}"></div></div>
+  </div>`;
+}
+
+function field(label, content) {
+  return `<div class="field"><label>${label}</label><div class="val">${content}</div></div>`;
+}
+
+function nullVal(v) {
+  return v != null ? v : `<span class="null">—</span>`;
+}
+
+function pillList(arr, cls = '') {
+  if (!arr || arr.length === 0) return `<span class="null">—</span>`;
+  return `<div class="pill-list">${arr.map(x => pill(x, cls)).join('')}</div>`;
+}
+
+function renderAccess(d) {
+  return `
+    <div class="fields">
+      ${field('שם',        nullVal(d.name))}
+      ${field('גיל משוער', nullVal(d.age_estimate))}
+      ${field('מגדר',      nullVal(d.gender))}
+      ${field('מקצוע',     nullVal(d.profession))}
+      ${field('השכלה',     nullVal(d.education_level))}
+      ${field('סוג אישיות',nullVal(d.personality_type))}
+      ${field('סגנון תקשורת', nullVal(d.communication_style))}
+    </div>
+    <div class="fields" style="margin-top:.75rem">
+      ${field('ערכי ליבה',   pillList(d.core_values, 'blue'))}
+      ${field('מטרות חיים',  pillList(d.life_goals))}
+      ${field('תחומי עניין', pillList(d.interests))}
+      ${field('חוזקות',      pillList(d.strengths, 'green'))}
+      ${field('חולשות',      pillList(d.weaknesses, 'red'))}
+    </div>`;
+}
+
+function renderMirror(d) {
+  return `
+    <div class="fields">
+      ${field('רגש דומיננטי', `<strong>${d.dominant_emotion}</strong>`)}
+      ${field('עוצמה', `${d.emotional_intensity}/10 ${scoreBar(d.emotional_intensity)}`)}
+      ${field('מצב רוח',      nullVal(d.mood))}
+      ${field('רמת מתח',      nullVal(d.stress_level))}
+      ${field('יציבות רגשית', nullVal(d.emotional_stability))}
+    </div>
+    <div class="fields" style="margin-top:.75rem">
+      ${field('רגשות משניים',   pillList(d.secondary_emotions))}
+      ${field('סימני חרדה',     pillList(d.anxiety_indicators, 'red'))}
+      ${field('צרכים בסיסיים',  pillList(d.underlying_needs, 'blue'))}
+      ${field('סיכום', `<em>${d.summary}</em>`)}
+    </div>`;
+}
+
+function renderLanguage(d) {
+  return `
+    <div class="fields">
+      ${field('פורמליות',  `${d.formality_level}/10 ${scoreBar(d.formality_level, 10, '#34d399')}`)}
+      ${field('נחרצות',    `${d.assertiveness}/10 ${scoreBar(d.assertiveness, 10, '#34d399')}`)}
+      ${field('אוצר מילים',nullVal(d.vocabulary_richness))}
+      ${field('טון',       nullVal(d.dominant_tone))}
+      ${field('כנות',      nullVal(d.honesty_indicators))}
+    </div>
+    <div class="fields" style="margin-top:.75rem">
+      ${field('דפוסי תקשורת', pillList(d.communication_patterns, 'green'))}
+      ${field('סימני הסטה',   pillList(d.deflection_signs, 'red'))}
+      ${field('ביטויים מאפיינים', pillList(d.key_phrases))}
+    </div>`;
+}
+
+function renderShadow(d) {
+  return `
+    <div class="fields">
+      ${field('נרקיסיזם',   `${d.narcissism_score}/10 ${scoreBar(d.narcissism_score, 10, '#f87171')}`)}
+      ${field('נטיית שליטה',`${d.control_tendency}/10 ${scoreBar(d.control_tendency, 10, '#f87171')}`)}
+      ${field('אמפתיה',     `${d.empathy_level}/10 ${scoreBar(d.empathy_level, 10, '#34d399')}`)}
+      ${field('המלצת אמון', `<strong>${d.trust_recommendation}</strong>`)}
+    </div>
+    <div class="fields" style="margin-top:.75rem">
+      ${field('דגלים אדומים',       pillList(d.red_flags, 'red'))}
+      ${field('טקטיקות מניפולציה',  pillList(d.manipulation_tactics, 'red'))}
+      ${field('סיכום סיכון', `<em>${d.risk_summary}</em>`)}
+    </div>`;
+}
+
+function renderSummary(d) {
+  return `
+    <div class="headline-box">
+      <div class="headline">${d.headline}</div>
+      <div class="score">ציון אמינות כללי: ${d.overall_score}/10 ${scoreBar(d.overall_score, 10, '#fbbf24')}</div>
+    </div>
+    <div class="fields">
+      ${field('סיכום מנהלים', `<em>${d.executive_summary}</em>`)}
+    </div>
+    <div class="fields" style="margin-top:.75rem">
+      ${field('תובנות מפתח',    pillList(d.key_insights, 'blue'))}
+      ${field('טיפים לתקשורת', pillList(d.interaction_tips, 'green'))}
+      ${field('להיזהר מ',       pillList(d.watch_out_for, 'red'))}
+    </div>`;
+}
+
+const ENGINE_META = {
+  access:   { title: '👤 פרופיל אישי — Access Engine',   cls: 'engine-access',   render: renderAccess },
+  emotions: { title: '🪞 מצב רגשי — Mirror Engine',      cls: 'engine-mirror',   render: renderMirror },
+  language: { title: '💬 סגנון שפה — Language Engine',   cls: 'engine-language', render: renderLanguage },
+  shadow:   { title: '🔍 צד נסתר — Shadow Engine',       cls: 'engine-shadow',   render: renderShadow },
+};
+
+async function runEngine(engine) {
+  const text = textarea.value.trim();
+  if (!text) { alert('נא להכניס טקסט לניתוח.'); return; }
+  if (text.length > MAX) { alert(`הטקסט ארוך מדי (${text.length}/${MAX}).`); return; }
+
+  const resultsEl = document.getElementById('results');
+  const loaderId = 'loader-' + engine;
+
+  // Show loading placeholder
+  const existing = document.getElementById('result-' + engine);
+  if (existing) existing.remove();
+
+  const loader = document.createElement('div');
+  loader.id = loaderId;
+  loader.className = 'result-block';
+  loader.innerHTML = `<span class="spinner"></span> מנתח...`;
+  resultsEl.prepend(loader);
+
+  try {
+    const url = engine === 'full' ? '/api/v1/profile' :
+                engine === 'access' ? '/api/v1/analyze' :
+                engine === 'emotions' ? '/api/v1/emotions' :
+                engine === 'language' ? '/api/v1/language' : '/api/v1/shadow';
+
+    const res  = await fetch(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ text }),
+    });
+    const data = await res.json();
+
+    if (!res.ok) {
+      loader.outerHTML = `<div class="error-box">שגיאה: ${data.error || res.statusText}</div>`;
+      return;
+    }
+
+    if (engine === 'full') {
+      loader.remove();
+      // Render all engines from full response
+      const order = ['summary', 'access', 'emotions', 'language', 'shadow'];
+      const renderMap = {
+        summary:  { title: '⚡ סיכום מקיף — Summary Engine', cls: 'engine-summary', render: renderSummary, key: 'summary' },
+        access:   { ...ENGINE_META.access,   key: 'profile' },
+        emotions: { ...ENGINE_META.emotions, key: 'emotions' },
+        language: { ...ENGINE_META.language, key: 'language' },
+        shadow:   { ...ENGINE_META.shadow,   key: 'shadow' },
+      };
+      order.forEach(eng => {
+        const meta = renderMap[eng];
+        const block = document.createElement('div');
+        block.id = 'result-' + eng;
+        block.className = `result-block ${meta.cls}`;
+        block.innerHTML = `<h2>${meta.title}</h2>${meta.render(data[meta.key])}`;
+        resultsEl.prepend(block);
+      });
+    } else {
+      const meta = ENGINE_META[engine];
+      const key  = engine === 'access' ? 'profile' : engine;
+      loader.id = 'result-' + engine;
+      loader.className = `result-block ${meta.cls}`;
+      loader.innerHTML = `<h2>${meta.title}</h2>${meta.render(data[key])}`;
+    }
+  } catch (err) {
+    loader.outerHTML = `<div class="error-box">שגיאת חיבור: ${err.message}</div>`;
+  }
+}
+</script>
+</body>
+</html>
